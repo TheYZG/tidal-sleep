@@ -142,16 +142,21 @@ function createRain(ctx: AudioContext): SyntheticHandle {
 }
 
 // 雷声：低频褐噪音 + 偶发爆发（用 LFO 触发 gain 脉冲）
+// 注意：LFO 不能直接调制 output.gain，否则音轨关闭时（output.gain=0）
+// LFO 仍会让 gain 波动，导致声音泄漏。改用中间 modGain 接收调制。
 function createThunder(ctx: AudioContext): SyntheticHandle {
   const buffer = makeBrownNoiseBuffer(ctx, 4);
   const source = makeLoopSource(ctx, buffer);
   const lp = ctx.createBiquadFilter();
   lp.type = 'lowpass';
   lp.frequency.value = 200;
+  // modGain 接收 LFO 调制，基础值 0，LFO 让它在 0~0.25 波动
+  const modGain = ctx.createGain();
+  modGain.gain.value = 0;
   const output = ctx.createGain();
   output.gain.value = 0;
-  source.connect(lp).connect(output);
-  // 周期性雷声脉冲
+  source.connect(lp).connect(modGain).connect(output);
+  // 周期性雷声脉冲：LFO 调制 modGain（不是 output.gain）
   const lfo = ctx.createOscillator();
   lfo.type = 'sawtooth';
   lfo.frequency.value = 0.08; // ~12秒一次
@@ -159,7 +164,7 @@ function createThunder(ctx: AudioContext): SyntheticHandle {
   lfoGain.gain.value = 0.25;
   const rect = ctx.createWaveShaper();
   rect.curve = makeRectifierCurve();
-  lfo.connect(rect).connect(lfoGain).connect(output.gain);
+  lfo.connect(rect).connect(lfoGain).connect(modGain.gain);
   return {
     output,
     start: () => {

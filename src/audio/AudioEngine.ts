@@ -57,6 +57,9 @@ class AudioEngineImpl {
       // 始终创建合成器作为兜底
       const handle = createSynthetic(this.ctx, t.syntheticKind);
       handle.output.connect(trackGain);
+      // 合成器 output 默认设为 1（让它能发声），音量由 trackGain 控制
+      // 录音模式下再把 output 设为 0 静音合成器
+      handle.output.gain.value = 1;
       handle.start();
 
       let useRecording = false;
@@ -79,6 +82,7 @@ class AudioEngineImpl {
             bufferSource.connect(bufferGain).connect(trackGain);
             bufferSource.start();
             useRecording = true;
+            // 录音加载成功：静音合成器（output.gain = 0）
             handle.output.gain.value = 0;
           }
         } catch {
@@ -150,7 +154,8 @@ class AudioEngineImpl {
       loaded.handle.output.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05);
       g.gain.setTargetAtTime(1, this.ctx.currentTime, 0.05);
     } else {
-      // 合成模式：trackGain 控制音量
+      // 合成模式：合成器 output=1（已设），trackGain 控制音量
+      loaded.handle.output.gain.setTargetAtTime(1, this.ctx.currentTime, 0.05);
       g.gain.setTargetAtTime(vol, this.ctx.currentTime, 0.05);
     }
   }
