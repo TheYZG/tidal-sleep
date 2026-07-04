@@ -15,7 +15,7 @@ export function RippleCanvas() {
       canvas,
       ctx,
       () => AudioEngine.getLevel(),
-      (nowMs) => AudioEngine.detectOnset(nowMs),
+      () => AudioEngine.getFreqData(),
       (spawn) => spawn() // 默认随机位置
     );
 

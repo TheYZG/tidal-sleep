@@ -29,6 +29,7 @@ class AudioEngineImpl {
   private masterGain: GainNode | null = null;
   private analyser: AnalyserNode | null = null;
   private timeData: Uint8Array<ArrayBuffer> | null = null;
+  private freqData: Uint8Array<ArrayBuffer> | null = null;
   private loaded = new Map<string, LoadedTrack>();
   private trackGains = new Map<string, GainNode>();
   private tracks: Track[] = [];
@@ -46,6 +47,7 @@ class AudioEngineImpl {
     this.analyser.fftSize = 1024;
     this.analyser.smoothingTimeConstant = 0.6;
     this.timeData = new Uint8Array(this.analyser.fftSize);
+    this.freqData = new Uint8Array(this.analyser.frequencyBinCount);
     this.masterGain.connect(this.analyser).connect(this.ctx.destination);
 
     for (const t of this.tracks) {
@@ -182,6 +184,13 @@ class AudioEngineImpl {
       sum += v * v;
     }
     return Math.sqrt(sum / this.timeData.length);
+  }
+
+  /** 返回频谱数据（0-255），用于频谱条可视化 */
+  getFreqData(): Uint8Array<ArrayBuffer> | null {
+    if (!this.analyser || !this.freqData) return null;
+    this.analyser.getByteFrequencyData(this.freqData);
+    return this.freqData;
   }
 
   detectOnset(nowMs: number): boolean {
