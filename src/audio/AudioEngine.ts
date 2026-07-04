@@ -4,20 +4,25 @@ import { OnsetDetector } from './OnsetDetector';
 interface Track {
   id: string;
   syntheticKind: SyntheticKind;
-  src?: string; // 录音文件路径，可选
+  src?: string;
 }
 
 interface LoadedTrack {
-  handle: SyntheticHandle; // 合成器（始终存在，作为兜底）
-  bufferSource?: AudioBufferSourceNode; // 录音 buffer（若加载成功）
-  bufferGain?: GainNode; // 录音 gain
-  useRecording: boolean; // 是否使用录音（true=录音, false=合成）
+  handle: SyntheticHandle;
+  bufferSource?: AudioBufferSourceNode;
+  bufferGain?: GainNode;
+  useRecording: boolean;
 }
 
 /**
  * AudioEngine — 单例
- * 每个音轨：尝试加载录音文件，成功则播放录音，失败回退到合成
- * 输出路径：录音/合成 → trackGain → masterGain → analyser → destination
+ *
+ * 无缝循环策略：
+ * 1. 录音 buffer 加载后，对首尾做 crossfade 处理（在内存里重写 buffer）
+ *    - 取末尾 N ms 与开头 N ms 做等功率交叉淡化
+ *    - 处理后的 buffer 用 loop=true 播放，样本级精确循环，无咔哒声
+ * 2. 切换音轨时用 setTargetAtTime 做增益淡入淡出（~50ms）
+ * 3. 多轨叠加各自独立循环，互不干扰
  */
 class AudioEngineImpl {
   private ctx: AudioContext | null = null;
@@ -58,26 +63,25 @@ class AudioEngineImpl {
       let bufferSource: AudioBufferSourceNode | undefined;
       let bufferGain: GainNode | undefined;
 
-      // 尝试加载录音文件
       if (t.src) {
         try {
           const resp = await fetch(t.src);
           if (resp.ok) {
             const buf = await resp.arrayBuffer();
             const audioBuf = await this.ctx.decodeAudioData(buf);
+            // 关键：对 buffer 做首尾 crossfade 处理，实现无缝循环
+            const seamlessBuf = this.makeSeamlessLoop(audioBuf);
             bufferSource = this.ctx.createBufferSource();
-            bufferSource.buffer = audioBuf;
+            bufferSource.buffer = seamlessBuf;
             bufferSource.loop = true;
             bufferGain = this.ctx.createGain();
-            bufferGain.gain.value = 0; // 默认静音，播放时再开
+            bufferGain.gain.value = 0;
             bufferSource.connect(bufferGain).connect(trackGain);
             bufferSource.start();
             useRecording = true;
-            // 静音合成器（保留运行但听不见）
             handle.output.gain.value = 0;
           }
         } catch {
-          // 文件不存在或解码失败，使用合成
           useRecording = false;
         }
       }
@@ -92,6 +96,46 @@ class AudioEngineImpl {
     this.started = true;
   }
 
+  /**
+   * 对 AudioBuffer 做首尾交叉淡化，使其可以无缝循环播放
+   * 算法：取末尾 crossfadeMs 与开头 crossfadeMs 重叠，做等功率交叉淡化
+   * 处理后的 buffer 长度 = 原长度 - crossfadeMs
+   */
+  private makeSeamlessLoop(buf: AudioBuffer, crossfadeMs = 50): AudioBuffer {
+    const sampleRate = buf.sampleRate;
+    const crossfadeSamples = Math.min(
+      Math.floor(sampleRate * crossfadeMs / 1000),
+      Math.floor(buf.length / 4) // 不超过总长 1/4，防止过短素材被吃掉太多
+    );
+
+    // 太短的素材不处理（短于 200ms）
+    if (buf.length < sampleRate * 0.2) return buf;
+
+    const newLength = buf.length - crossfadeSamples;
+    const out = this.ctx!.createBuffer(
+      buf.numberOfChannels,
+      newLength,
+      sampleRate
+    );
+
+    for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+      const src = buf.getChannelData(ch);
+      const dst = out.getChannelData(ch);
+      // 复制主体（不含末尾 crossfade 段）
+      for (let i = 0; i < newLength; i++) dst[i] = src[i];
+      // 对开头 crossfadeSamples 长度做交叉淡化：开头淡入 + 末尾淡出 等功率混合
+      for (let i = 0; i < crossfadeSamples; i++) {
+        const t = i / crossfadeSamples;
+        // 等功率交叉淡化：sin/cos 曲线
+        const fadeIn = Math.sin(t * Math.PI / 2);
+        const fadeOut = Math.cos(t * Math.PI / 2);
+        const tailSample = src[newLength + i]; // 末尾段
+        dst[i] = dst[i] * fadeIn + tailSample * fadeOut;
+      }
+    }
+    return out;
+  }
+
   registerTracks(tracks: Track[]) {
     this.tracks = tracks;
   }
@@ -100,16 +144,14 @@ class AudioEngineImpl {
     const g = this.trackGains.get(id);
     const loaded = this.loaded.get(id);
     if (!g || !this.ctx || !loaded) return;
-    // 总 trackGain 始终为 vol（统一控制）
-    g.gain.setTargetAtTime(vol, this.ctx.currentTime, 0.05);
-    // 录音模式：bufferGain = vol，合成静音
-    // 合成模式：handle.output 已连接，gain 默认 1，由 trackGain 控制
     if (loaded.useRecording && loaded.bufferGain) {
+      // 录音模式：bufferGain 控制音量，合成器静音
       loaded.bufferGain.gain.setTargetAtTime(vol, this.ctx.currentTime, 0.05);
-      // 合成器保持静音
       loaded.handle.output.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05);
-      // trackGain 设为 1（不再衰减）
       g.gain.setTargetAtTime(1, this.ctx.currentTime, 0.05);
+    } else {
+      // 合成模式：trackGain 控制音量
+      g.gain.setTargetAtTime(vol, this.ctx.currentTime, 0.05);
     }
   }
 
