@@ -1,17 +1,40 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useAudioStore } from '../store/audioStore';
 import { TrackCard } from './TrackCard';
 import { CATEGORY_LABELS } from '../data/tracks';
 import type { TrackState } from '../store/audioStore';
 
 export function BottomControls() {
-  const { tracks, masterVolume, setMasterVolume } = useAudioStore();
+  const { tracks, masterVolume, setMasterVolume, background, setBackground, resetBackground } = useAudioStore();
   const [open, setOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const byCategory = (cat: TrackState['category']) =>
     tracks.filter((t) => t.category === cat);
   const cats: TrackState['category'][] = ['nature', 'fire', 'urban', 'noise'];
   const activeCount = tracks.filter((t) => t.isPlaying).length;
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const isVideo = file.type.startsWith('video/');
+    const isImage = file.type.startsWith('image/');
+    if (!isVideo && !isImage) return;
+    // 用 DataURL 持久化（图片小可存 localStorage；视频大则不持久化，刷新后回退默认）
+    const reader = new FileReader();
+    reader.onload = () => {
+      const src = reader.result as string;
+      setBackground({
+        kind: 'custom',
+        src,
+        isVideo,
+        name: file.name,
+      });
+    };
+    reader.readAsDataURL(file);
+    // 清空 input，允许重复选同一文件
+    e.target.value = '';
+  };
 
   return (
     <>
@@ -29,10 +52,8 @@ export function BottomControls() {
         )}
       </button>
 
-      {/* 遮罩（移动端用，桌面点外不关） */}
       {open && <div className="drawer-overlay" onClick={() => setOpen(false)} />}
 
-      {/* 抽屉本体 */}
       <aside className={`drawer ${open ? 'is-open' : ''}`}>
         <div className="drawer__head">
           <div className="drawer__title">
@@ -53,6 +74,42 @@ export function BottomControls() {
               </div>
             </section>
           ))}
+        </div>
+
+        <div className="drawer__bg-section">
+          <div className="drawer__group-label">背景</div>
+          <div className="drawer__bg-controls">
+            <button
+              className="drawer__bg-btn"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <span className="drawer__bg-btn-icon">⊜</span>
+              <span className="drawer__bg-btn-text">
+                {background.kind === 'custom' ? '更换背景' : '上传图片/视频'}
+              </span>
+            </button>
+            {background.kind === 'custom' && (
+              <button
+                className="drawer__bg-btn drawer__bg-btn--reset"
+                onClick={resetBackground}
+              >
+                <span className="drawer__bg-btn-icon">↺</span>
+                <span className="drawer__bg-btn-text">恢复默认</span>
+              </button>
+            )}
+            {background.kind === 'custom' && background.name && (
+              <div className="drawer__bg-name" title={background.name}>
+                {background.name}
+              </div>
+            )}
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,video/*"
+            onChange={handleFileChange}
+            style={{ display: 'none' }}
+          />
         </div>
 
         <div className="drawer__master">

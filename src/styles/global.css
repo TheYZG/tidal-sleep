@@ -88,6 +88,11 @@ button {
   will-change: transform;
 }
 
+.video-bg__img {
+  /* 图片背景：同样滤镜，object-fit cover 保证铺满 */
+  object-fit: cover;
+}
+
 /* 用伪元素遮罩模拟"模糊感" — 比真 blur 便宜得多 */
 .video-bg__veil {
   position: absolute;
@@ -599,6 +604,73 @@ button {
   gap: 14px;
   padding: 18px 24px;
   border-top: 1px solid var(--glass-border);
+}
+
+/* ==========================================================================
+   背景选择区
+   ========================================================================== */
+
+.drawer__bg-section {
+  padding: 18px 24px 8px;
+  border-top: 1px solid var(--glass-border);
+}
+
+.drawer__bg-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.drawer__bg-btn {
+  flex: 1;
+  min-width: 120px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  transition: all var(--t-fast);
+  cursor: pointer;
+}
+
+.drawer__bg-btn:hover {
+  border-color: var(--glass-border-strong);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+}
+
+.drawer__bg-btn--reset {
+  flex: 0 0 auto;
+  min-width: auto;
+  padding: 10px 12px;
+}
+
+.drawer__bg-btn-icon {
+  font-size: 14px;
+  color: var(--accent);
+}
+
+.drawer__bg-btn-text {
+  white-space: nowrap;
+}
+
+.drawer__bg-name {
+  width: 100%;
+  margin-top: 8px;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 11px;
+  color: var(--text-faint);
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .drawer__master-label {

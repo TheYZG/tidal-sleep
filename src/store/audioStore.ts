@@ -19,18 +19,47 @@ export interface TrackState {
   isPlaying: boolean;
 }
 
+// 背景类型
+export type BackgroundKind = 'default' | 'custom';
+export interface BackgroundState {
+  kind: BackgroundKind;
+  src: string; // 自定义背景的 ObjectURL 或 DataURL
+  isVideo: boolean; // true=视频，false=图片
+  name: string; // 文件名（用于显示）
+}
+
+// localStorage 持久化的自定义背景（只存类型和 DataURL）
+const STORAGE_KEY = 'tidal-sleep-bg';
+const loadStoredBg = (): BackgroundState => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as BackgroundState;
+      if (parsed.kind === 'custom' && parsed.src) {
+        return parsed;
+      }
+    }
+  } catch {
+    /* 忽略损坏的存储 */
+  }
+  return { kind: 'default', src: '', isVideo: false, name: '' };
+};
+
 interface AudioStore {
   tracks: TrackState[];
   masterVolume: number;
   uiVisible: boolean;
-  timerMinutes: number | null; // null = 不计时
+  timerMinutes: number | null;
   timerEndsAt: number | null;
+  background: BackgroundState;
   toggleTrack: (id: string) => void;
   setTrackVolume: (id: string, vol: number) => void;
   setMasterVolume: (vol: number) => void;
   setUiVisible: (v: boolean) => void;
   setTimer: (minutes: number | null) => void;
   stopAll: () => void;
+  setBackground: (bg: BackgroundState) => void;
+  resetBackground: () => void;
 }
 
 export const useAudioStore = create<AudioStore>((set, get) => ({
@@ -39,6 +68,7 @@ export const useAudioStore = create<AudioStore>((set, get) => ({
   uiVisible: true,
   timerMinutes: null,
   timerEndsAt: null,
+  background: loadStoredBg(),
 
   toggleTrack: (id) => {
     const t = get().tracks.find((x) => x.id === id);
@@ -89,6 +119,29 @@ export const useAudioStore = create<AudioStore>((set, get) => ({
       timerMinutes: null,
       timerEndsAt: null,
     }));
+  },
+
+  setBackground: (bg) => {
+    set({ background: bg });
+    // 持久化到 localStorage（只持久化自定义背景）
+    try {
+      if (bg.kind === 'custom' && bg.src) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(bg));
+      } else {
+        localStorage.removeItem(STORAGE_KEY);
+      }
+    } catch {
+      // 存储失败（可能是 DataURL 太大），静默忽略
+    }
+  },
+
+  resetBackground: () => {
+    set({ background: { kind: 'default', src: '', isVideo: false, name: '' } });
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      /* */
+    }
   },
 }));
 
