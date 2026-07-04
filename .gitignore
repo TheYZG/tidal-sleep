@@ -1,0 +1,32 @@
+# 音频素材（后续下载，体积大）
+src/assets/sounds/recorded/*.mp3
+src/assets/sounds/recorded/*.wav
+src/assets/sounds/recorded/*.ogg
+
+# 依赖
+node_modules/
+
+# 构建产物
+dist/
+build/
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
