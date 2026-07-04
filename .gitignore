@@ -1,5 +1,5 @@
 # 大文件素材（github.com:443 直连不通，本地保留）
-Background/
+public/Background/
 
 # 音频素材（后续下载，体积大）
 src/assets/sounds/recorded/*.mp3

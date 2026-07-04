@@ -1,0 +1,656 @@
+/* ==========================================================================
+   潮汐眠境 · 全局样式 V2
+   性能优化版：去除多元素 backdrop-filter，简化滤镜，降低合成层开销
+   ========================================================================== */
+
+:root {
+  --bg-deep: #07090d;
+  --bg-mid: #0d1117;
+  --glass-bg: rgba(13, 17, 23, 0.78);
+  --glass-bg-solid: rgba(13, 17, 23, 0.92);
+  --glass-border: rgba(180, 215, 235, 0.08);
+  --glass-border-strong: rgba(180, 215, 235, 0.18);
+  --text-primary: #e8eef5;
+  --text-muted: #8b95a3;
+  --text-faint: #4a5260;
+  --accent: #6fb3a8;
+  --accent-glow: rgba(111, 179, 168, 0.35);
+  --accent-dim: rgba(111, 179, 168, 0.15);
+  --ripple-rgb: 180, 215, 235;
+
+  --font-display: 'Cormorant Garamond', 'Noto Serif SC', serif;
+  --font-ui: 'Manrope', 'Noto Serif SC', system-ui, sans-serif;
+
+  --t-fast: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  --t-mid: 400ms cubic-bezier(0.4, 0, 0.2, 1);
+  --t-slow: 1200ms cubic-bezier(0.16, 1, 0.3, 1);
+
+  --drawer-width: 340px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button {
+  font-family: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+::selection {
+  background: var(--accent-dim);
+}
+
+/* ==========================================================================
+   App 容器
+   ========================================================================== */
+
+.app {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ==========================================================================
+   视频背景层 — 性能优化：去掉 blur 滤镜，用半透明遮罩模拟
+   ========================================================================== */
+
+.video-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
+
+.video-bg__el {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* 只保留 brightness/contrast，去掉 blur（blur 在视频上极耗 GPU） */
+  filter: brightness(0.5) saturate(0.8) contrast(1.05);
+  transform: scale(1.04);
+  will-change: transform;
+}
+
+/* 用伪元素遮罩模拟"模糊感" — 比真 blur 便宜得多 */
+.video-bg__veil {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 50% 40%, transparent 0%, rgba(7, 9, 13, 0.55) 100%),
+    linear-gradient(180deg, rgba(7, 9, 13, 0.4) 0%, transparent 30%, transparent 70%, rgba(7, 9, 13, 0.6) 100%);
+  pointer-events: none;
+  /* 轻微模糊遮罩边缘，单一元素合成开销小 */
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.vignette {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(0, 0, 0, 0.5) 100%);
+}
+
+/* ==========================================================================
+   涟漪层 — 去掉 mix-blend-mode，用浅色半透明直接画
+   ========================================================================== */
+
+.ripple-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* ==========================================================================
+   UI 层
+   ========================================================================== */
+
+.ui-layer {
+  position: relative;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--t-mid);
+}
+
+.ui-layer.is-visible {
+  opacity: 1;
+}
+
+.ui-layer > * {
+  pointer-events: auto;
+}
+
+/* ==========================================================================
+   顶部栏
+   ========================================================================== */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 28px 40px;
+  background: linear-gradient(180deg, rgba(7, 9, 13, 0.7) 0%, transparent 100%);
+}
+
+.topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.topbar__mark {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow);
+  animation: breathe 4s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 0.5; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+.topbar__title {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+}
+
+.topbar__title-cn {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: 0.15em;
+  color: var(--text-primary);
+}
+
+.topbar__title-en {
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-style: italic;
+  font-weight: 300;
+  letter-spacing: 0.3em;
+  color: var(--text-muted);
+  margin-top: 4px;
+  text-transform: lowercase;
+}
+
+/* ==========================================================================
+   计时器
+   ========================================================================== */
+
+.timer {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.timer__display {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 300;
+  letter-spacing: 0.08em;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  min-width: 70px;
+  text-align: right;
+}
+
+.timer__opts {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--glass-bg-solid);
+  border: 1px solid var(--glass-border);
+  border-radius: 100px;
+  /* 只在这里用 backdrop-filter，单元素 */
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.timer__opt {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  border-radius: 100px;
+  transition: all var(--t-fast);
+}
+
+.timer__opt:hover {
+  color: var(--text-primary);
+}
+
+.timer__opt.is-active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+/* ==========================================================================
+   抽屉触发按钮（固定右下）
+   ========================================================================== */
+
+.drawer-trigger {
+  position: fixed;
+  right: 32px;
+  bottom: 32px;
+  z-index: 5;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--glass-bg-solid);
+  border: 1px solid var(--glass-border-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--t-mid);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.drawer-trigger:hover {
+  color: var(--text-primary);
+  border-color: var(--accent-dim);
+  transform: scale(1.05);
+}
+
+.drawer-trigger.has-active {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+.drawer-trigger.is-open {
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.8);
+}
+
+.drawer-trigger__badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--bg-deep);
+  font-size: 10px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.drawer-trigger__icon {
+  font-family: var(--font-display);
+}
+
+/* ==========================================================================
+   抽屉遮罩
+   ========================================================================== */
+
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  background: rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  animation: fade-in var(--t-mid) forwards;
+}
+
+@keyframes fade-in {
+  to { opacity: 1; }
+}
+
+/* ==========================================================================
+   右侧抽屉
+   ========================================================================== */
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+  width: var(--drawer-width);
+  max-width: 90vw;
+  background: var(--glass-bg-solid);
+  border-left: 1px solid var(--glass-border);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform var(--t-mid);
+  /* 单元素 backdrop-filter，可接受 */
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: -16px 0 48px rgba(0, 0, 0, 0.5);
+}
+
+.drawer.is-open {
+  transform: translateX(0);
+}
+
+.drawer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 28px 24px 20px;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.drawer__title {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+}
+
+.drawer__title-cn {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 400;
+  letter-spacing: 0.2em;
+  color: var(--text-primary);
+}
+
+.drawer__title-en {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 11px;
+  font-weight: 300;
+  letter-spacing: 0.3em;
+  color: var(--text-faint);
+  margin-top: 6px;
+  text-transform: lowercase;
+}
+
+.drawer__close {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: var(--text-muted);
+  font-size: 14px;
+  transition: all var(--t-fast);
+}
+
+.drawer__close:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.drawer__scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 20px 24px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-border-strong) transparent;
+}
+
+.drawer__scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.drawer__scroll::-webkit-scrollbar-thumb {
+  background: var(--glass-border-strong);
+  border-radius: 2px;
+}
+
+.drawer__group {
+  margin-bottom: 24px;
+}
+
+.drawer__group-label {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.4em;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+.drawer__tracks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ==========================================================================
+   音轨卡片 — 去掉 backdrop-filter，用纯色半透明
+   ========================================================================== */
+
+.track {
+  position: relative;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all var(--t-fast);
+  overflow: hidden;
+}
+
+.track::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, var(--accent-dim) 0%, transparent 60%);
+  opacity: 0;
+  transition: opacity var(--t-mid);
+  pointer-events: none;
+}
+
+.track:hover {
+  border-color: var(--glass-border-strong);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.track.is-playing {
+  border-color: var(--accent-dim);
+  background: rgba(111, 179, 168, 0.05);
+}
+
+.track.is-playing::before {
+  opacity: 1;
+}
+
+.track__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.track__icon {
+  font-size: 15px;
+  filter: grayscale(0.4) brightness(0.85);
+  transition: filter var(--t-mid);
+}
+
+.track.is-playing .track__icon {
+  filter: grayscale(0) brightness(1.1);
+}
+
+.track__name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.track__name-en {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 10px;
+  color: var(--text-faint);
+  margin-left: auto;
+  letter-spacing: 0.05em;
+}
+
+.track__pulse {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  transition: background var(--t-mid);
+}
+
+.track.is-playing .track__pulse {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+/* ==========================================================================
+   滑块
+   ========================================================================== */
+
+.track__slider input,
+.drawer__master input {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 3px;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0%,
+    var(--accent) var(--pct, 30%),
+    rgba(255, 255, 255, 0.08) var(--pct, 30%),
+    rgba(255, 255, 255, 0.08) 100%
+  );
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.track__slider input::-webkit-slider-thumb,
+.drawer__master input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  box-shadow: 0 0 0 1px var(--glass-border-strong);
+  cursor: grab;
+  transition: transform var(--t-fast);
+}
+
+.track__slider input::-webkit-slider-thumb:hover,
+.drawer__master input::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+.track__slider input::-moz-range-thumb,
+.drawer__master input::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  border: none;
+  cursor: grab;
+}
+
+/* ==========================================================================
+   总音量
+   ========================================================================== */
+
+.drawer__master {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 24px;
+  border-top: 1px solid var(--glass-border);
+}
+
+.drawer__master-label {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 12px;
+  letter-spacing: 0.15em;
+  color: var(--text-muted);
+  min-width: 50px;
+}
+
+.drawer__master input {
+  flex: 1;
+}
+
+/* ==========================================================================
+   入场动画
+   ========================================================================== */
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.ui-layer.is-visible .topbar {
+  animation: fade var(--t-slow) both;
+}
+
+.ui-layer.is-visible .drawer-trigger {
+  animation: rise var(--t-slow) both;
+}
+
+/* ==========================================================================
+   响应式
+   ========================================================================== */
+
+@media (max-width: 768px) {
+  .topbar { padding: 20px 20px; }
+  .topbar__title-cn { font-size: 18px; }
+  .timer__display { font-size: 22px; }
+  .drawer-trigger { right: 20px; bottom: 20px; width: 48px; height: 48px; }
+  :root { --drawer-width: 88vw; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
