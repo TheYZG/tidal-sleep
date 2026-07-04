@@ -1,38 +1,56 @@
-// Canvas 音频可视化渲染器 V2
-// 三层可视化，确保"始终活着、一眼可感知"：
-// 1. 呼吸光晕：屏幕中心径向渐变，半径/亮度跟总音量实时联动
-// 2. 频谱条：屏幕底部细条频谱，跟节奏跳动（最直观）
-// 3. 涟漪：音量越大生成越频繁（不依赖 onset 峰值检测）
+// Canvas 雨滴可视化渲染器 V3
 //
-// 性能：DPR 限制 1.5、涟漪上限 14、空闲跳帧
-export interface Ripple {
+// 核心思路：用频谱能量驱动雨滴生成，音频变化自然决定雨滴密度/位置/大小
+//
+// 雨滴生成：
+// - 频谱分成 N 段（雨滴区域），每段对应屏幕一个水平区域
+// - 每段维护自己的能量阈值，能量超过阈值就生成雨滴
+// - 音频变化 → 频谱变化 → 不同区域雨滴密度不同，自然形成"雨打玻璃"效果
+//
+// 雨滴形态（模拟真实雨滴打在水面/玻璃）：
+// - 撞击瞬间：中心一个亮点（雨滴落下）
+// - 主涟漪：快速向外扩散的圆环
+// - 次级涟漪：稍慢的第二个圆环
+// - 溅起水花：撞击瞬间几个小点向外飞溅
+// - 扩散过程中圆环变细变淡
+//
+// 性能：DPR 限制 1.5、雨滴上限 30、空闲跳帧
+
+export interface Raindrop {
   x: number;
   y: number;
-  radius: number;
-  maxRadius: number;
-  alpha: number;
   age: number;
   duration: number;
+  maxRadius: number;
+  // 溅起的水花点
+  splashes: { x: number; y: number; vx: number; vy: number; life: number }[];
+}
+
+// 频谱段：每个段对应屏幕一个水平区域
+interface FreqBand {
+  startBin: number;
+  endBin: number;
+  // 平滑后的能量，用于阈值判断
+  smoothedEnergy: number;
+  // 上次触发时间，防止同一区域过密
+  lastTriggerTime: number;
 }
 
 export class RippleRenderer {
-  private ripples: Ripple[] = [];
+  private drops: Raindrop[] = [];
   private rafId = 0;
   private lastTime = 0;
   private dpr = 1;
-  private lastRippleTime = 0;
 
-  // 频谱数据
-  private freqData: Uint8Array<ArrayBuffer> | null = null;
-  private getFreqData: () => Uint8Array<ArrayBuffer> | null;
+  // 频谱分段
+  private bands: FreqBand[] = [];
+  private readonly bandCount = 12; // 屏幕水平分 12 个区域
 
   // 调参
-  maxRadiusBase = 110;
-  durationMs = 1200;
-  initialAlpha = 0.7;
   strokeColor = '180, 215, 235';
-  glowColor = '111, 179, 168'; // 呼吸光晕色（青绿）
-  private readonly maxRipples = 14;
+  glowColor = '111, 179, 168';
+  impactColor = '220, 240, 250'; // 撞击点亮色
+  private readonly maxDrops = 30;
   private idleFrames = 0;
 
   constructor(
@@ -42,7 +60,17 @@ export class RippleRenderer {
     private getFreqDataFn: () => Uint8Array<ArrayBuffer> | null,
     private spawnTrigger: (cb: (x: number, y: number) => void) => void
   ) {
-    this.getFreqData = getFreqDataFn;
+    // 初始化频谱段
+    // 假设 freqData 长度 ~512，前 1/3（~170 bins）是人耳敏感区，分成 12 段
+    // 在第一次拿到数据时再真正初始化 bins
+    for (let i = 0; i < this.bandCount; i++) {
+      this.bands.push({
+        startBin: 0,
+        endBin: 0,
+        smoothedEnergy: 0,
+        lastTriggerTime: 0,
+      });
+    }
   }
 
   start() {
@@ -73,53 +101,112 @@ export class RippleRenderer {
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
   }
 
+  // 兼容旧接口（外部可能调用 spawn）
   spawn(x?: number, y?: number) {
-    if (this.ripples.length >= this.maxRipples) this.ripples.shift();
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    this.ripples.push({
-      x: x ?? Math.random() * w,
-      y: y ?? Math.random() * h,
-      radius: 0,
-      maxRadius: this.maxRadiusBase,
-      alpha: this.initialAlpha,
+    this.spawnDrop(x ?? Math.random() * window.innerWidth, y ?? Math.random() * window.innerHeight, 80);
+  }
+
+  // 生成一个雨滴，size 控制最大半径
+  private spawnDrop(x: number, y: number, size: number) {
+    if (this.drops.length >= this.maxDrops) this.drops.shift();
+    // 溅起的水花：4-7 个小点向外飞
+    const splashCount = 4 + Math.floor(Math.random() * 4);
+    const splashes: Raindrop['splashes'] = [];
+    for (let i = 0; i < splashCount; i++) {
+      const angle = (Math.PI * 2 * i) / splashCount + Math.random() * 0.5;
+      const speed = 0.3 + Math.random() * 0.5;
+      splashes.push({
+        x,
+        y,
+        vx: Math.cos(angle) * speed * size * 0.08,
+        vy: Math.sin(angle) * speed * size * 0.08,
+        life: 1,
+      });
+    }
+    this.drops.push({
+      x,
+      y,
       age: 0,
-      duration: this.durationMs,
+      duration: 1400 + Math.random() * 400,
+      maxRadius: size,
+      splashes,
     });
     this.idleFrames = 0;
   }
 
   private update(dt: number, nowMs: number) {
-    const level = this.getLevel();
-    // level 通常 0~0.3，放大用于驱动效果
-    const amplified = Math.min(1, level * 3);
-    const dynamicMax = this.maxRadiusBase * (1 + amplified * 1.5);
+    const freqData = this.getFreqDataFn();
 
-    // 涟漪生成：音量越大生成越频繁（不再依赖 onset）
-    // 音量 0 → 每 1500ms 一个；音量满 → 每 150ms 一个
-    const interval = 1500 - amplified * 1350;
-    if (amplified > 0.02 && nowMs - this.lastRippleTime > interval) {
-      this.lastRippleTime = nowMs;
-      this.spawnTrigger((x, y) => this.spawn(x, y));
+    if (freqData) {
+      // 首次拿到数据时初始化 bands 的 bin 范围
+      if (this.bands[0].startBin === 0 && this.bands[0].endBin === 0) {
+        // 用前 60% 的频段（避开高频噪音），分成 bandCount 段
+        const usableBins = Math.floor(freqData.length * 0.6);
+        const binsPerBand = Math.floor(usableBins / this.bandCount);
+        for (let i = 0; i < this.bandCount; i++) {
+          this.bands[i].startBin = i * binsPerBand;
+          this.bands[i].endBin = (i + 1) * binsPerBand;
+        }
+      }
+
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const bandWidth = w / this.bandCount;
+
+      // 逐段判断是否生成雨滴
+      for (let i = 0; i < this.bandCount; i++) {
+        const band = this.bands[i];
+        // 计算该段平均能量
+        let sum = 0;
+        let count = 0;
+        for (let j = band.startBin; j < band.endBin; j++) {
+          sum += freqData[j] || 0;
+          count++;
+        }
+        const energy = count > 0 ? sum / count / 255 : 0; // 0-1
+
+        // 平滑能量（低通滤波）
+        band.smoothedEnergy = band.smoothedEnergy * 0.85 + energy * 0.15;
+
+        // 阈值判断：当前能量超过平滑能量的 1.3 倍，且超过最小阈值 0.12
+        // 这样音频有波动才会生成雨滴，平稳时稀疏，突然变响时密集
+        const threshold = Math.max(0.12, band.smoothedEnergy * 1.3);
+        if (
+          energy > threshold &&
+          energy > 0.12 &&
+          nowMs - band.lastTriggerTime > 60 // 同一区域最小间隔 60ms
+        ) {
+          band.lastTriggerTime = nowMs;
+          // 在该段对应的水平区域内随机位置生成雨滴
+          const x = i * bandWidth + Math.random() * bandWidth;
+          const y = Math.random() * h;
+          // 雨滴大小由能量决定：30 ~ 130
+          const size = 30 + energy * 100;
+          this.spawnDrop(x, y, size);
+          // 同时调用外部 spawnTrigger（兼容旧逻辑，目前为空操作）
+          this.spawnTrigger(() => {});
+        }
+      }
     }
 
-    // 更新现有涟漪
-    for (const r of this.ripples) {
-      r.age += dt;
-      const progress = r.age / r.duration;
-      r.radius = dynamicMax * easeOutCubic(progress);
-      r.alpha = this.initialAlpha * (1 - progress);
+    // 更新现有雨滴
+    for (const d of this.drops) {
+      d.age += dt;
+      // 更新水花
+      for (const s of d.splashes) {
+        s.x += s.vx * dt * 0.1;
+        s.y += s.vy * dt * 0.1;
+        s.vy += dt * 0.0005; // 重力
+        s.life -= dt / 400;
+      }
     }
-    this.ripples = this.ripples.filter((r) => r.age < r.duration);
+    this.drops = this.drops.filter((d) => d.age < d.duration);
 
-    if (this.ripples.length === 0) {
+    if (this.drops.length === 0) {
       this.idleFrames++;
     } else {
       this.idleFrames = 0;
     }
-
-    // 拉取频谱数据
-    this.freqData = this.getFreqData();
   }
 
   private draw() {
@@ -127,29 +214,22 @@ export class RippleRenderer {
     const h = window.innerHeight;
     this.ctx.clearRect(0, 0, w, h);
 
+    // === 呼吸光晕（保留，作为氛围底色）===
     const level = this.getLevel();
     const amplified = Math.min(1, level * 3);
-
-    // === 第 1 层：呼吸光晕（屏幕中心径向渐变）===
     this.drawBreathGlow(w, h, amplified);
 
-    // === 第 2 层：频谱条（屏幕底部）===
-    this.drawSpectrum(w, h);
+    // === 雨滴 ===
+    this.drawDrops();
 
-    // === 第 3 层：涟漪 ===
-    this.drawRipples();
-
-    // 空闲时也保留 1 帧避免完全黑屏（呼吸光晕始终在）
     void this.idleFrames;
   }
 
   private drawBreathGlow(w: number, h: number, amplified: number) {
     const cx = w / 2;
     const cy = h / 2;
-    // 半径随音量从 30% 屏幕宽 扩到 70%
-    const radius = (w * 0.3) + amplified * (w * 0.4);
-    // 亮度随音量
-    const alpha = 0.05 + amplified * 0.18;
+    const radius = w * 0.3 + amplified * w * 0.4;
+    const alpha = 0.04 + amplified * 0.14;
     const grad = this.ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
     grad.addColorStop(0, `rgba(${this.glowColor}, ${alpha})`);
     grad.addColorStop(0.5, `rgba(${this.glowColor}, ${alpha * 0.4})`);
@@ -158,52 +238,55 @@ export class RippleRenderer {
     this.ctx.fillRect(0, 0, w, h);
   }
 
-  private drawSpectrum(w: number, h: number) {
-    if (!this.freqData) return;
-    const data = this.freqData;
-    // 只用前 1/3 频段（人耳敏感区），映射到屏幕宽
-    const bins = Math.floor(data.length / 3);
-    const barCount = 64;
-    const step = Math.floor(bins / barCount);
-    const barWidth = w / barCount;
-    const maxBarHeight = h * 0.18; // 频谱最高占屏幕 18%
-    const baseY = h; // 从屏幕底部往上长
+  private drawDrops() {
+    for (const d of this.drops) {
+      const progress = d.age / d.duration;
+      if (progress >= 1) continue;
 
-    for (let i = 0; i < barCount; i++) {
-      // 取这组里的最大值
-      let v = 0;
-      for (let j = 0; j < step; j++) {
-        v = Math.max(v, data[i * step + j] || 0);
-      }
-      const normalized = v / 255;
-      const barH = normalized * maxBarHeight;
-      if (barH < 1) continue;
-      const x = i * barWidth;
-      // 渐变：底部青绿 → 顶部冷白
-      const grad = this.ctx.createLinearGradient(0, baseY, 0, baseY - barH);
-      grad.addColorStop(0, `rgba(${this.glowColor}, 0.5)`);
-      grad.addColorStop(1, `rgba(${this.strokeColor}, 0.85)`);
-      this.ctx.fillStyle = grad;
-      this.ctx.fillRect(x + 1, baseY - barH, barWidth - 2, barH);
-    }
-  }
+      // 主涟漪：快速扩散
+      const mainProgress = Math.min(1, progress * 1.4);
+      const mainRadius = d.maxRadius * easeOutCubic(mainProgress);
+      const mainAlpha = (1 - mainProgress) * 0.7;
 
-  private drawRipples() {
-    this.ctx.lineWidth = 2;
-    for (const r of this.ripples) {
-      // 主圆环 - 实心填充半透明 + 描边
-      this.ctx.beginPath();
-      this.ctx.arc(r.x, r.y, r.radius, 0, Math.PI * 2);
-      this.ctx.fillStyle = `rgba(${this.strokeColor}, ${r.alpha * 0.08})`;
-      this.ctx.fill();
-      this.ctx.strokeStyle = `rgba(${this.strokeColor}, ${r.alpha})`;
-      this.ctx.stroke();
-      // 内圈
-      if (r.radius > 12) {
+      // 撞击点：只在前期可见（前 15%）
+      if (progress < 0.15) {
+        const impactAlpha = (1 - progress / 0.15) * 0.9;
         this.ctx.beginPath();
-        this.ctx.arc(r.x, r.y, r.radius * 0.65, 0, Math.PI * 2);
-        this.ctx.strokeStyle = `rgba(${this.glowColor}, ${r.alpha * 0.5})`;
+        this.ctx.arc(d.x, d.y, 2.5, 0, Math.PI * 2);
+        this.ctx.fillStyle = `rgba(${this.impactColor}, ${impactAlpha})`;
+        this.ctx.fill();
+      }
+
+      // 主圆环
+      if (mainRadius > 1) {
+        this.ctx.beginPath();
+        this.ctx.arc(d.x, d.y, mainRadius, 0, Math.PI * 2);
+        this.ctx.strokeStyle = `rgba(${this.strokeColor}, ${mainAlpha})`;
+        this.ctx.lineWidth = 1.8;
         this.ctx.stroke();
+      }
+
+      // 次级涟漪：稍慢，半径更小
+      const secondProgress = Math.min(1, progress * 0.8);
+      if (secondProgress > 0.1) {
+        const secondRadius = d.maxRadius * 0.6 * easeOutCubic(secondProgress);
+        const secondAlpha = (1 - secondProgress) * 0.35;
+        if (secondRadius > 1) {
+          this.ctx.beginPath();
+          this.ctx.arc(d.x, d.y, secondRadius, 0, Math.PI * 2);
+          this.ctx.strokeStyle = `rgba(${this.glowColor}, ${secondAlpha})`;
+          this.ctx.lineWidth = 1.2;
+          this.ctx.stroke();
+        }
+      }
+
+      // 溅起的水花
+      for (const s of d.splashes) {
+        if (s.life <= 0) continue;
+        this.ctx.beginPath();
+        this.ctx.arc(s.x, s.y, 1.2 * s.life, 0, Math.PI * 2);
+        this.ctx.fillStyle = `rgba(${this.strokeColor}, ${s.life * 0.6})`;
+        this.ctx.fill();
       }
     }
   }
